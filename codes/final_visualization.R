@@ -299,6 +299,136 @@ myggsave(plot = ecdf, filename = "../data/st_ter_BCR_new/plots/dist_ecdf_tumor.p
          width = 7, height = 6)
 
 #####Fig.5 & S5#####
+######Fig. 5A######
+stBCR_apoptosis_around_IgG = function(sample, st_BCR_df=bcr.h[["RH05B"]]){
+  rdsfile = dir("../data/slice7.results.renew/reanno_cjy_T_B/") %>% .[grep(sample, .)]
+  stRNA = readRDS(paste0("../data/slice7.results.renew/reanno_cjy_T_B/", rdsfile))
+  ## Subset IGHG1 isotype
+  st_BCR_df = st_BCR_df[st_BCR_df$isotype == "IGHG1",]
+  if (nrow(st_BCR_df) == 0) {
+    cat("No available BCR found in", sample, "\n")
+    return(NULL)
+  }
+  ## Reorganize the st_BCR_df$BinID
+  st_BCR_df$BinID = gsub(paste0(sample,"_"), "",st_BCR_df$BinID)
+  ## Assign the bins that is B cell and also shares bcr with single cell data
+  shared.bins = stRNA$bins[as.character(stRNA$bins) %in% st_BCR_df$BinID & stRNA$predict_CellType %in% c("B", "Plasma")]
+  ## Add a BCR column to the stRNA metadata:
+  st.meta = stRNA@meta.data
+  names(st_BCR_df)[names(st_BCR_df) == "BinID"] = "bins"
+  st.meta.merge = merge(st.meta, st_BCR_df, by = "bins")
+  ## Get the IGHG1+ B/Plasma bins
+  bcr.bins = st.meta.merge$bins[grepl("Tumor",st.meta.merge$Bin_Region.x) &
+                                  st.meta.merge$bins %in% st_BCR_df$bins &
+                                  st.meta.merge$predict_CellType %in% c("B", "Plasma")]
+  bcr.coords = st.meta.merge[st.meta.merge$bins %in% bcr.bins,
+                             c("row", "col")]
+  if (nrow(bcr.coords) == 0){
+    cat("No bcr bins available for analyis in", sample, "\n")
+    return(NULL)
+  }
+  ## Get IGHG1+ surrounding coords:
+  sur.coords = get_all_surrounding_coords(bcr.coords, max_distance = 3)
+  sur.meta = merge(st.meta, sur.coords, by = c("row", "col"))
+  sur.tumor = sur.meta$bins[sur.meta$bins %nin% bcr.bins &
+                                     sur.meta$predict_CellType == "Hepatocyte" &
+                              grepl("Tumor",sur.meta$Bin_Region)]
+  sur.tumor = unique(sur.tumor)
+  ## Other B/Plasma (not IGHG1+)
+  nbcr.bins = st.meta$bins[grepl("Tumor",st.meta$Bin_Region) &
+                             st.meta$bins %nin% st_BCR_df$bins &
+                             st.meta$predict_CellType %in% c("B", "Plasma")]
+  nbcr.coords = st.meta[st.meta$bins %in% nbcr.bins,
+                        c("row", "col")]
+  if (nrow(nbcr.coords) == 0){
+    cat("No bcr bins available for analyis in", sample, "\n")
+    return(NULL)
+  }
+  nsur.coords = get_all_surrounding_coords(nbcr.coords, max_distance = 3)
+  nsur.meta = merge(st.meta, nsur.coords, by = c("row", "col"))
+  nsur.tumor = nsur.meta$bins[nsur.meta$bins %nin% bcr.bins &
+                                nsur.meta$predict_CellType == "Hepatocyte" &
+                                grepl("Tumor",nsur.meta$Bin_Region) &
+                                nsur.meta$bins %nin% sur.tumor]
+  nsur.tumor = unique(nsur.tumor)
+  sur.tumor.df = data.frame(bins = c(sur.tumor, nsur.tumor),
+                            group = c(rep("Surround_IGHG1_tumor",length(sur.tumor)),
+                                      rep("Not_surround_IGHG1_tumor",length(nsur.tumor))))
+  if (nrow(sur.tumor.df) == 0){
+    cat("No tumor bins available for analyis in", sample, "\n")
+    return(NULL)
+  }
+  ## Perform GSVA to calculate apoptosis
+  expr = GetAssayData(stRNA, slot = "counts", assay = "Spatial") %>% as_matrix()
+  colnames(expr) = gsub(paste0("_",unique(stRNA$orig.ident)),"", colnames(expr))
+  expr = expr[,c(sur.tumor.df$bins)]
+  expr = aggregate_columns_by_name(expr)
+  gc()
+  apop.gsva = gsva(expr, apop.list, method = "ssgsea", kcdf = "Gaussian", abs.ranking = T)
+  gc()
+  apop.gsva = as.data.frame(t(apop.gsva))
+  apop.gsva$bins = rownames(apop.gsva)
+  apop.gsva = merge(apop.gsva, sur.tumor.df, by = "bins")
+  rownames(apop.gsva) = apop.gsva$bins
+  apop.gsva = apop.gsva[,-1]
+  apop.gsva = apop.gsva %>% 
+    rownames_to_column("bins") %>% 
+    pivot_longer(cols = 2:6,
+                 names_to = "apop_sets",
+                 values_to = "gsva_score")
+  apop.gsva$orig.ident = sample
+  return(apop.gsva)
+}
+st.group = openxlsx::read.xlsx("sample.cor.group_3group_new.xlsx")
+st.group$sample = st.group$orig.ident
+st.group = merge(st.group, le.group, by = c("sample", "group"))
+le.apop = data.frame()
+for (sample in st.group$orig.ident){
+  id = st.group$sample[st.group$orig.ident == sample]
+  st_BCR_df = bcr.h[[id]]
+  sample.apop = stBCR_apoptosis_around_IgG(sample, st_BCR_df)
+  le.apop = rbind(le.apop, sample.apop)
+}
+le.apop.merge = merge(le.apop, st.group, by = "orig.ident", all.x = T)
+st.group = openxlsx::read.xlsx("../data/st_ter_BCR_new/sample.cor.group_3group_new.xlsx")
+st.group$sample = st.group$orig.ident
+st.group = merge(st.group, le.group, by = c("sample", "group"))
+le.apop.merge = merge(le.apop, st.group, by = "orig.ident", all.x = T)
+pdf("../data/st_ter_BCR_new/plots/all_3_Group_apoptosis.pdf", width = 5, height = 6)
+for (apop in unique(le.apop.merge$apop_sets)){
+  apop.df = le.apop.merge[le.apop.merge$apop_sets == apop,]
+  stat.test = apop.df %>% 
+    group_by(group.y) %>% 
+    t_test(gsva_score ~ group.x, ref.group = "Not_surround_IGHG1_expansion_tumor") %>% 
+    adjust_pvalue() %>% 
+    add_xy_position(x = "group.y", dodge = .9)
+  stat.test$p.adj.signif = ifelse(stat.test$p.adj > .05, "ns",
+                                  ifelse(stat.test$p.adj > .01, "*",
+                                         ifelse(stat.test$p.adj > .001, "**",
+                                                ifelse(stat.test$p.adj > .0001, "***", "****"))))
+  stat.test$p.signif = ifelse(stat.test$p > .05, "ns",
+                              ifelse(stat.test$p > .01, "*",
+                                     ifelse(stat.test$p > .001, "**",
+                                            ifelse(stat.test$p > .0001, "***", "****"))))
+  print(ggplot(apop.df, aes(group.y, gsva_score)) +
+          geom_violin(aes(fill = group.x, color = group.x),scale = "width", trim = F) + 
+          geom_boxplot(aes(fill = group.x, color = group.x),
+                       width = .1, outlier.shape = NA, color = "black", linewidth = violin.box.lwd,
+                       position = position_dodge(.9)) + 
+          labs(x = "", y = "ssGSEA score", title = apop) + 
+          scale_fill_manual(values = two.colors) +
+          scale_color_manual(values = two.colors) + 
+          stat_pvalue_manual(stat.test, label = "p.signif", size = 5, bracket.size = p.lwd) +
+          guides(fill = guide_legend(title = "", ncol = 1),
+                 color = guide_legend(title = "", ncol = 1)) + 
+          mytheme2 + theme(plot.title = element_text(size = 13),
+                           legend.text = element_text(size = 12),
+                           legend.title = element_text(size = 13),
+                           legend.position = "bottom",
+                           axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1)))
+}
+dev.off()
+
 ######Fig. 5B######
 tumor=readRDS('../data/single_cell_RNA/tumor cell.rds')
 all_gene_sets <- msigdbr(species = "Homo sapiens")
