@@ -248,6 +248,7 @@ cjy_getCirclized_after_cjy_MSA_from_data_frame = function(clonotype.df, plot_dir
                                                           link.not.display.threshold = 0.1,
                                                           niceFacing = T,big.gap = .5, 
                                                           small.gap = .2, seed = 123) {
+  require(RColorBrewer)
   ## Make sure that the first 4 columns are: from, to, value1, value2
   if (ncol(clonotype.df) < 4) {
     cat("The input data frame should have at least 4 columns: from, to, value1, value2\n")
@@ -281,7 +282,7 @@ cjy_getCirclized_after_cjy_MSA_from_data_frame = function(clonotype.df, plot_dir
     dir.create(plot_dir, recursive = TRUE)
   }
   pdf(paste0(plot_dir,sample,"_chordDiagram_data_frame.pdf"), width = plot.width, height = plot.height)
-  chordDiagram(clonotype.df, grid.col = grid.col, 
+  chordDiagram(clonotype.df, grid.col = grid.col, group = group,
                annotationTrack = c("grid"), small.gap = small.gap,
                big.gap = big.gap,
                col = col_mat, transparency = chord_transparency,
@@ -296,14 +297,34 @@ cjy_getCirclized_after_cjy_MSA_from_data_frame = function(clonotype.df, plot_dir
   grid.pals = brewer.pal(length(grid.types), "Set1")
   pals = 1
   for (unique.type in grid.types){
-    print(unique.type)
-    grid.names = clonotype.df[, grep(paste0(unique.type,"_"), clonotype.df[1,,drop = TRUE])]
+    cat("Adding the outer track for the grid: ", unique.type, "\n")
+    ## Here is a special case, we need to judge if the unique.type is in the pre-treatment or post-treatment
+    ## Post treatment contains "A" and pre-treatment does not contain "A"
+    ## All the "from" are pre-treatment and all the "to" are post-treatment
+    if (grepl("A", unique.type)) {
+      grid.names = clonotype.df[,2][grep(paste0(unique.type,"_"), clonotype.df[,2,drop = TRUE])]
+    } else {
+      grid.names = clonotype.df[,1][grep(paste0(unique.type,"_"), clonotype.df[,1,drop = TRUE])]
+    }
     ## Judge if the length of grid.names is larger than a threshold:
     highlight.sector(grid.names, track.index = 1, col = grid.pals[pals], 
                      text = unique.type, cex = 1, text.col = "white", 
                      niceFacing = niceFacing)
     pals = pals + 1
   }
+  circos.clear()
+  # Add sector labels
+  chordDiagram(clonotype.df, grid.col = grid.col, group = group,
+               annotationTrack = c("grid"), small.gap = small.gap,
+               big.gap = big.gap,
+               col = col_mat, transparency = chord_transparency,
+               grid.border = "#000000",
+               preAllocateTracks = list(track.height = mm_h(6),
+                                        track.margin = c(mm_h(outer.grid.space), 0.3)))
+  circos.track(track.index = 1, panel.fun = function(x, y) {
+    circos.text(CELL_META$xcenter, CELL_META$ylim[1], CELL_META$sector.index, 
+                facing = "clockwise", niceFacing = TRUE, adj = c(0, .5), cex = .5)
+  }, bg.border = NA)
   circos.clear()
   dev.off()
   openxlsx::write.xlsx(clonotype.df, file = paste0(plot_dir,sample,"_data_frame.xlsx"), rowNames = T)

@@ -16,6 +16,16 @@ get_surrounding_coords <- function(coord, max_distance) {
                                                (surrounding_coords$col == coord$col)), ]
   return(surrounding_coords)
 }
+get_surrounding_square_coords <- function(coord, max_distance) {
+  surrounding_coords <- expand.grid(
+    row = (coord$row - max_distance):(coord$row + max_distance),
+    col = (coord$col - max_distance):(coord$col + max_distance)
+  )
+  # Exclude the center coordinate
+  surrounding_coords <- surrounding_coords[!((surrounding_coords$row == coord$row) &
+                                               (surrounding_coords$col == coord$col)), ]
+  return(surrounding_coords)
+}
 # Function to get surrounding coordinates for all points in the data.frame
 get_all_surrounding_coords <- function(coords_df, max_distance) {
   # Initialize an empty list to store the surrounding coordinates for each point
